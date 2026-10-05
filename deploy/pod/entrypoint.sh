@@ -23,7 +23,7 @@ export STORAGE_DIR="$DATA_ROOT/objects"
 export HF_HUB_CACHE="$DATA_ROOT/hf/hub"
 export HF_HUB_DISABLE_SYMLINKS_WARNING=1
 export PATH="/app/.venv/bin:$PATH"
-export RELEASE_WEIGHTS_AFTER_JOB=true
+export RELEASE_WEIGHTS_AFTER_JOB="${RELEASE_WEIGHTS_AFTER_JOB:-true}"
 
 if [ ! -s "$PGDATA/PG_VERSION" ]; then
   su postgres -c "$PG_BIN/initdb -D '$PGDATA' --username=postgres --auth=trust"
