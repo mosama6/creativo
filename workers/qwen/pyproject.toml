@@ -9,6 +9,7 @@ dependencies = [
   "diffusers>=0.36",
   "fastapi>=0.115",
   "huggingface-hub>=0.26",
+  "peft>=0.17",
   "pillow>=11",
   "protobuf>=5",
   "redis>=5.2",
