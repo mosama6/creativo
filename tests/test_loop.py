@@ -176,8 +176,8 @@ async def test_auto_and_planned_models_are_rejected(api):
         assert auto.json()["error"]["code"] == "model_selection_required"
         planned = await client.post(
             "/api/v1/generations",
-            json=_generation(model="qwen-image"),
-            headers={**CLIENT, "Idempotency-Key": "qwen-planned-001"},
+            json=_generation(model="wan"),
+            headers={**CLIENT, "Idempotency-Key": "wan-planned-0001"},
         )
         assert planned.status_code == 422
         assert planned.json()["error"]["code"] == "model_unavailable"

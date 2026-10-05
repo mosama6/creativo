@@ -36,7 +36,8 @@ RUN uv sync --frozen --no-dev \
     --package creativo-api \
     --package creativo-orchestrator \
     --package creativo-worker \
-    --package creativo-flux
+    --package creativo-flux \
+    --package creativo-qwen
 
 COPY deploy/pod/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

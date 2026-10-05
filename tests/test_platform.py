@@ -177,6 +177,32 @@ def test_flux_adapter_pins_schnell_sampling() -> None:
     assert parameters["guidance_scale"] == 0.0
     assert parameters["width"] == 512
     assert "batch_size" not in parameters
+
+
+def test_qwen_adapter_pins_image_2512_sampling() -> None:
+    adapter = adapter_for("qwen-image")
+    assert adapter is not None
+    body = CreateGenerationRequest(
+        type="image",
+        mode="text_to_image",
+        model="qwen-image",
+        prompt="a ceramic cup on a wooden table",
+        aspect_ratio="1:1",
+        resolution="1024",
+    )
+    capabilities = {
+        "text_to_image": True,
+        "image_to_image": False,
+        "aspect_ratios": ["1:1"],
+        "resolutions": ["1024"],
+        "max_reference_images": 0,
+    }
+    adapter.validate(body, capabilities)
+    assert adapter.estimate_cost(body, 4) == 4
+    parameters = adapter.build_parameters(body)
+    assert parameters["num_inference_steps"] == 50
+    assert parameters["true_cfg_scale"] == 4.0
+    assert parameters["width"] == 1024
     assert "fixture_behavior" not in parameters
 
 

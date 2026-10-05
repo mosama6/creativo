@@ -14,6 +14,7 @@ members = [
   "apps/orchestrator",
   "workers/fake",
   "workers/flux",
+  "workers/qwen",
 ]
 
 [[tool.uv.index]]
@@ -52,6 +53,7 @@ src = [
   "apps/orchestrator/src",
   "workers/fake/src",
   "workers/flux/src",
+  "workers/qwen/src",
   "tests",
 ]
 

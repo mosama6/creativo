@@ -94,6 +94,20 @@ class FluxEngine:
             transformer=pipe.transformer,
         )
 
+    def unload(self) -> None:
+        """Drop the pipeline so another model can use the GPU."""
+        self.pipe = None
+        self.img2img = None
+        import gc
+
+        gc.collect()
+        try:
+            import torch
+        except ImportError:
+            return
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     def _load_resident(self, torch, pipeline_cls):
         pipe = pipeline_cls.from_pretrained(BASE_REPO, torch_dtype=torch.bfloat16)
         pipe.enable_model_cpu_offload()

@@ -118,9 +118,33 @@ def _require_mode(body: CreateGenerationRequest, capabilities: dict) -> None:
         raise AppError("invalid_parameters", "Video generations cannot use an image mode.", 422)
 
 
+class QwenImageAdapter:
+    """Qwen-Image-2512. Fifty steps and a true CFG scale of 4, text to image only."""
+
+    model_id = "qwen-image"
+
+    def validate(self, body: CreateGenerationRequest, capabilities: dict) -> None:
+        _validate_image_request(body, capabilities)
+
+    def estimate_cost(self, body: CreateGenerationRequest, credit_cost: int) -> int:
+        return credit_cost
+
+    def build_parameters(self, body: CreateGenerationRequest) -> dict:
+        width, height = pixel_size(body.resolution or "1024", body.aspect_ratio or "1:1")
+        return {
+            "aspect_ratio": body.aspect_ratio,
+            "resolution": body.resolution,
+            "width": max(64, width // 16 * 16),
+            "height": max(64, height // 16 * 16),
+            "num_inference_steps": 50,
+            "true_cfg_scale": 4.0,
+        }
+
+
 ADAPTERS: dict[str, ModelAdapter] = {
     FixtureImageAdapter.model_id: FixtureImageAdapter(),
     FluxImageAdapter.model_id: FluxImageAdapter(),
+    QwenImageAdapter.model_id: QwenImageAdapter(),
 }
 
 

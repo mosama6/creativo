@@ -11,6 +11,7 @@ members = [
     "creativo-db",
     "creativo-flux",
     "creativo-orchestrator",
+    "creativo-qwen",
     "creativo-worker",
 ]
 
@@ -437,6 +438,43 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "redis", specifier = ">=5.2" },
+    { name = "uvicorn", specifier = ">=0.32" },
+]
+
+[[package]]
+name = "creativo-qwen"
+version = "0.1.0"
+source = { editable = "workers/qwen" }
+dependencies = [
+    { name = "accelerate" },
+    { name = "creativo-common" },
+    { name = "creativo-contracts" },
+    { name = "diffusers" },
+    { name = "fastapi" },
+    { name = "huggingface-hub" },
+    { name = "pillow" },
+    { name = "protobuf" },
+    { name = "redis" },
+    { name = "sentencepiece" },
+    { name = "torch" },
+    { name = "transformers" },
+    { name = "uvicorn" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "accelerate", specifier = ">=1.2" },
+    { name = "creativo-common", editable = "packages/common" },
+    { name = "creativo-contracts", editable = "packages/contracts" },
+    { name = "diffusers", specifier = ">=0.36" },
+    { name = "fastapi", specifier = ">=0.115" },
+    { name = "huggingface-hub", specifier = ">=0.26" },
+    { name = "pillow", specifier = ">=11" },
+    { name = "protobuf", specifier = ">=5" },
+    { name = "redis", specifier = ">=5.2" },
+    { name = "sentencepiece", specifier = ">=0.2" },
+    { name = "torch", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu128" },
+    { name = "transformers", specifier = ">=4.55" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]
 

@@ -56,7 +56,8 @@ class PlatformSettings(BaseSettings):
     session_ttl_seconds: int = Field(default=14 * 24 * 3600)
     idempotency_ttl_seconds: int = Field(default=24 * 3600)
     retry_delay_seconds: float = 1.0
-    batch_fill_seconds: float = 0.2
+    batch_fill_seconds: float = 3.0
+    release_weights_after_job: bool = False
     sfw_only: bool = True
 
     @property
