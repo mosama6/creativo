@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -62,17 +63,23 @@ def create_app() -> FastAPI:
         app.state.stopped = False
         app.state.load_error = None
         task = asyncio.create_task(heartbeat_loop(app))
+        load_task: asyncio.Task[None] | None = None
         try:
             await asyncio.to_thread(app.state.engine.probe)
-            await publish_heartbeat(app)
-            if not settings.release_weights_after_job:
-                await asyncio.to_thread(app.state.engine.load)
-            app.state.ready = True
         except Exception as exc:
             app.state.load_error = f"{type(exc).__name__}: {exc}"
-            logger.exception("qwen weights failed to load")
+            logger.exception("qwen probe failed")
+        else:
+            if settings.release_weights_after_job:
+                app.state.ready = True
+            else:
+                load_task = asyncio.create_task(_resident_load(app))
         await publish_heartbeat(app)
         yield
+        if load_task is not None:
+            load_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await load_task
         app.state.ready = False
         app.state.stopped = True
         task.cancel()
@@ -205,6 +212,20 @@ async def publish_heartbeat(app: FastAPI) -> None:
     )
     await redis.set(worker_key(settings.worker_id), beat.model_dump_json(), ex=15)
     await redis.sadd(workers_model_key(settings.worker_model_id), settings.worker_id)
+
+
+async def _resident_load(app: FastAPI) -> None:
+    try:
+        await asyncio.to_thread(app.state.engine.load)
+        app.state.ready = True
+        app.state.load_error = None
+        logger.info("qwen resident weights are ready")
+    except Exception as exc:
+        app.state.load_error = f"{type(exc).__name__}: {exc}"
+        app.state.ready = False
+        logger.exception("qwen weights failed to load")
+    finally:
+        await publish_heartbeat(app)
 
 
 async def heartbeat_loop(app: FastAPI) -> None:

@@ -1,11 +1,15 @@
+import logging
 import os
 from io import BytesIO
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 REPO = "Qwen/Qwen-Image-2512"
 LORA_REPO = "lightx2v/Qwen-Image-2512-Lightning"
 LORA_FILE = "Qwen-Image-2512-Lightning-4steps-V1.0-bf16.safetensors"
 STEPS = 4
+RESIDENT_VRAM_GB = 48
 
 
 def batch_limit_for_vram(vram_gb: int) -> int:
@@ -63,12 +67,22 @@ class QwenEngine:
 
         if not torch.cuda.is_available():
             raise RuntimeError("Qwen-Image-2512 needs a CUDA GPU.")
-        pipe = DiffusionPipeline.from_pretrained(REPO, torch_dtype=torch.bfloat16)
+        logger.info("qwen load: reading base weights from cache")
+        pipe = DiffusionPipeline.from_pretrained(
+            REPO,
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+        )
+        logger.info("qwen load: attaching Lightning LoRA (not fused, same as ComfyUI)")
         pipe.load_lora_weights(LORA_REPO, weight_name=LORA_FILE)
-        pipe.fuse_lora()
-        pipe.unload_lora_weights()
-        pipe.enable_model_cpu_offload()
+        if self.vram_gb >= RESIDENT_VRAM_GB:
+            logger.info("qwen load: moving pipeline to CUDA")
+            pipe.to("cuda")
+        else:
+            logger.info("qwen load: enabling CPU offload")
+            pipe.enable_model_cpu_offload()
         self.pipe = pipe
+        logger.info("qwen load: finished")
 
     def unload(self) -> None:
         self.pipe = None
