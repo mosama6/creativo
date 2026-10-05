@@ -68,11 +68,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: names
         run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v7
         with:
           context: .
           file: ${{ matrix.file }}
           push: true
+          provenance: false
+          sbom: false
           tags: |
             ghcr.io/${{ steps.names.outputs.owner }}/creativo/${{ matrix.name }}:latest
             ghcr.io/${{ steps.names.outputs.owner }}/creativo/${{ matrix.name }}:${{ github.sha }}
