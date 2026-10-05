@@ -15,6 +15,8 @@ from creativo_orchestrator.scheduler import (
     pack_limit,
     step_towards,
 )
+from creativo_qwen.engine import batch_limit_for_vram as qwen_batch_limit
+from creativo_qwen.engine import chunk_size as qwen_chunk_size
 
 
 def _worker(worker_id: str, active: int, status: str = "READY", cost: int = 0) -> WorkerHeartbeat:
@@ -200,10 +202,18 @@ def test_qwen_adapter_pins_image_2512_sampling() -> None:
     adapter.validate(body, capabilities)
     assert adapter.estimate_cost(body, 4) == 4
     parameters = adapter.build_parameters(body)
-    assert parameters["num_inference_steps"] == 50
-    assert parameters["true_cfg_scale"] == 4.0
+    assert parameters["num_inference_steps"] == 4
+    assert parameters["true_cfg_scale"] == 1.0
     assert parameters["width"] == 1024
     assert "fixture_behavior" not in parameters
+
+
+def test_qwen_batch_limit_follows_vram() -> None:
+    assert qwen_batch_limit(24) == 1
+    assert qwen_batch_limit(40) == 2
+    assert qwen_batch_limit(80) == 4
+    assert qwen_chunk_size(limit=2, width=1024, height=1024) == 1
+    assert qwen_chunk_size(limit=4, width=1024, height=1024) == 2
 
 
 def test_flux_batch_limit_follows_vram() -> None:

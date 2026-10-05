@@ -15,6 +15,7 @@ from creativo_common.settings import PlatformSettings, get_settings
 from creativo_common.storage import FileStorage
 from creativo_common.worker_auth import WorkerAuthError, verify
 from creativo_contracts.worker import (
+    GenerateBatchRequest,
     GenerateRequest,
     WorkerHeartbeat,
     WorkerJobView,
@@ -63,10 +64,13 @@ def create_app() -> FastAPI:
         task = asyncio.create_task(heartbeat_loop(app))
         try:
             await asyncio.to_thread(app.state.engine.probe)
+            await publish_heartbeat(app)
+            if not settings.release_weights_after_job:
+                await asyncio.to_thread(app.state.engine.load)
             app.state.ready = True
         except Exception as exc:
             app.state.load_error = f"{type(exc).__name__}: {exc}"
-            logger.exception("qwen probe failed")
+            logger.exception("qwen weights failed to load")
         await publish_heartbeat(app)
         yield
         app.state.ready = False
@@ -113,6 +117,27 @@ def create_app() -> FastAPI:
         jobs[payload.job_id] = JobState(attempt=payload.attempt, token=token)
         asyncio.create_task(run_job(app, payload, token))
         return JSONResponse({"job_id": payload.job_id, "status": "accepted"}, status_code=202)
+
+    @app.post("/generate-batch", status_code=202)
+    async def generate_batch(request: Request) -> JSONResponse:
+        body = await request.body()
+        authorize(request, body)
+        batch = GenerateBatchRequest.model_validate_json(body)
+        lead = request.headers.get("x-creativo-job-id")
+        if lead != batch.jobs[0].job_id:
+            raise WorkerAuthFailure("bad_signature")
+        if any(job.model != settings.worker_model_id for job in batch.jobs):
+            return JSONResponse(
+                {"job_id": lead, "status": "failed", "error_code": "unsupported_mode"},
+                status_code=422,
+            )
+        if not app.state.ready:
+            return JSONResponse({"error": {"code": "worker_busy"}}, status_code=429)
+        accepted = _accept_many(app, batch.jobs)
+        if isinstance(accepted, JSONResponse):
+            return accepted
+        asyncio.create_task(run_batch(app, batch.jobs, accepted))
+        return JSONResponse({"job_id": lead, "status": "accepted"}, status_code=202)
 
     @app.get("/jobs/{job_id}")
     async def read_job(job_id: str, request: Request) -> JSONResponse:
@@ -172,7 +197,7 @@ async def publish_heartbeat(app: FastAPI) -> None:
         status=status,  # type: ignore[arg-type]
         active_jobs=active,
         max_concurrent_jobs=1,
-        max_batch_size=1,
+        max_batch_size=engine.max_batch_size,
         queue_depth=active,
         advertise_url=settings.worker_advertise_url,
         hourly_micro_usd=0,
@@ -191,50 +216,119 @@ async def heartbeat_loop(app: FastAPI) -> None:
         await asyncio.sleep(2)
 
 
+def _accept_many(app: FastAPI, payloads: list[GenerateRequest]) -> JSONResponse | object:
+    jobs: dict[str, JobState] = app.state.jobs
+    incoming = {payload.job_id for payload in payloads}
+    if all(
+        (current := jobs.get(payload.job_id)) is not None and current.attempt == payload.attempt
+        for payload in payloads
+    ):
+        return JSONResponse({"job_id": payloads[0].job_id, "status": "accepted"}, status_code=202)
+    busy = any(job.status == "processing" and job_id not in incoming for job_id, job in jobs.items())
+    if busy:
+        return JSONResponse({"error": {"code": "worker_busy"}}, status_code=429)
+    token = object()
+    for payload in payloads:
+        jobs[payload.job_id] = JobState(attempt=payload.attempt, token=token)
+    return token
+
+
+def _shape(payload: GenerateRequest) -> tuple[int, int, int, float]:
+    return (
+        int(payload.parameters.get("width") or 1024),
+        int(payload.parameters.get("height") or 1024),
+        int(payload.parameters.get("num_inference_steps") or 4),
+        float(payload.parameters.get("true_cfg_scale") or 1.0),
+    )
+
+
+def _current(app: FastAPI, job_id: str, token: object) -> bool:
+    state = app.state.jobs.get(job_id)
+    return state is not None and state.token is token
+
+
+def _store(app: FastAPI, payload: GenerateRequest, data: bytes, token: object, started: float) -> None:
+    if not _current(app, payload.job_id, token):
+        return
+    key = f"outputs/{payload.generation_id}/attempt-{payload.attempt}.png"
+    app.state.storage.put(key, data)
+    output = WorkerOutput(
+        type="image", storage_key=key, content_type="image/png", byte_size=len(data)
+    )
+    state = app.state.jobs[payload.job_id]
+    state.status = "completed"
+    state.gpu_seconds = round(time.perf_counter() - started, 3)
+    state.output = output
+    state.outputs = [output]
+
+
+def fail(app: FastAPI, job_id: str, token: object, code: str, retryable: bool, message: str) -> None:
+    if not _current(app, job_id, token):
+        return
+    state = app.state.jobs[job_id]
+    if state.status != "processing":
+        return
+    state.status = "failed"
+    state.error_code = code
+    state.retryable = retryable
+    state.error_message = message
+
+
 async def run_job(app: FastAPI, payload: GenerateRequest, token: object) -> None:
+    await run_batch(app, [payload], token)
+
+
+async def run_batch(app: FastAPI, payloads: list[GenerateRequest], token: object) -> None:
     started = time.perf_counter()
     release = app.state.settings.release_weights_after_job
-    width = int(payload.parameters.get("width") or 1024)
-    height = int(payload.parameters.get("height") or 1024)
-    steps = int(payload.parameters.get("num_inference_steps") or 50)
-    true_cfg = float(payload.parameters.get("true_cfg_scale") or 4.0)
     try:
-        with gpu_lock():
-            try:
-                if release or app.state.engine.pipe is None:
+        if release:
+            with gpu_lock():
+                try:
                     await asyncio.to_thread(app.state.engine.load)
-                data = await asyncio.to_thread(
-                    app.state.engine.generate, payload.prompt, width, height, steps, true_cfg
-                )
-            finally:
-                if release:
+                    await _generate_qwen(app, payloads, token, started)
+                finally:
                     await asyncio.to_thread(app.state.engine.unload)
-        if app.state.jobs.get(payload.job_id) is None or app.state.jobs[payload.job_id].token is not token:
-            return
-        key = f"outputs/{payload.generation_id}/attempt-{payload.attempt}.png"
-        app.state.storage.put(key, data)
-        output = WorkerOutput(
-            type="image", storage_key=key, content_type="image/png", byte_size=len(data)
-        )
-        state = app.state.jobs[payload.job_id]
-        state.status = "completed"
-        state.gpu_seconds = round(time.perf_counter() - started, 3)
-        state.output = output
-        state.outputs = [output]
+        else:
+            with gpu_lock():
+                if app.state.engine.pipe is None:
+                    await asyncio.to_thread(app.state.engine.load)
+                await _generate_qwen(app, payloads, token, started)
     except Exception as exc:
-        logger.exception("qwen job failed")
-        state = app.state.jobs.get(payload.job_id)
-        if state is None or state.token is not token or state.status != "processing":
-            return
+        logger.exception("qwen batch failed")
         oom = exc.__class__.__name__ == "OutOfMemoryError"
-        state.status = "failed"
-        state.retryable = not oom
-        state.error_code = "cuda_oom" if oom else "model_crash"
-        state.error_message = (
-            "The GPU ran out of memory." if oom else "Qwen failed while generating."
-        )
+        for payload in payloads:
+            fail(
+                app,
+                payload.job_id,
+                token,
+                "cuda_oom" if oom else "model_crash",
+                not oom,
+                "The GPU ran out of memory." if oom else "Qwen failed while generating.",
+            )
     finally:
         await publish_heartbeat(app)
+
+
+async def _generate_qwen(
+    app: FastAPI, payloads: list[GenerateRequest], token: object, started: float
+) -> None:
+    grouped: dict[tuple[int, int, int, float], list[GenerateRequest]] = {}
+    for payload in payloads:
+        grouped.setdefault(_shape(payload), []).append(payload)
+    engine: QwenEngine = app.state.engine
+    for shape, group in grouped.items():
+        width, height, steps, true_cfg = shape
+        images = await asyncio.to_thread(
+            engine.generate_prompts,
+            [item.prompt for item in group],
+            width,
+            height,
+            steps,
+            true_cfg,
+        )
+        for payload, data in zip(group, images, strict=True):
+            _store(app, payload, data, token, started)
 
 
 def app() -> FastAPI:

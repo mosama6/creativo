@@ -119,7 +119,7 @@ def _require_mode(body: CreateGenerationRequest, capabilities: dict) -> None:
 
 
 class QwenImageAdapter:
-    """Qwen-Image-2512. Fifty steps and a true CFG scale of 4, text to image only."""
+    """Qwen-Image-2512 with the 4-step Lightning LoRA. CFG 1, text to image only."""
 
     model_id = "qwen-image"
 
@@ -136,8 +136,8 @@ class QwenImageAdapter:
             "resolution": body.resolution,
             "width": max(64, width // 16 * 16),
             "height": max(64, height // 16 * 16),
-            "num_inference_steps": 50,
-            "true_cfg_scale": 4.0,
+            "num_inference_steps": 4,
+            "true_cfg_scale": 1.0,
         }
 
 
