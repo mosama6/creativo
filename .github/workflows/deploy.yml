@@ -1,0 +1,41 @@
+name: deploy
+
+# Starts the split stack on a host that has Docker.
+# A RunPod pod cannot run this job: it is already one container, so it runs the pod image instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      profiles:
+        description: Worker profiles to start, space separated. Example flux
+        default: flux
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy the stack and start it
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          PROFILES: ${{ inputs.profiles }}
+        run: |
+          test -n "$DEPLOY_HOST" && test -n "$DEPLOY_USER" && test -n "$SSH_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          port="${DEPLOY_PORT:-22}"
+          ssh_opts="-i ~/.ssh/id_deploy -p $port -o StrictHostKeyChecking=accept-new"
+          ssh $ssh_opts "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/creativo"
+          scp -i ~/.ssh/id_deploy -P "$port" -o StrictHostKeyChecking=accept-new \
+            deploy/compose.yaml "$DEPLOY_USER@$DEPLOY_HOST:/opt/creativo/compose.yaml"
+          profile_args=""
+          for profile in $PROFILES; do
+            profile_args="$profile_args --profile $profile"
+          done
+          ssh $ssh_opts "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /opt/creativo && docker compose -f compose.yaml pull && docker compose -f compose.yaml $profile_args up -d"

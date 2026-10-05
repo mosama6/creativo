@@ -1,0 +1,59 @@
+[project]
+name = "creativo"
+version = "0.1.0"
+description = "Creativo generation platform"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv.workspace]
+members = [
+  "packages/common",
+  "packages/contracts",
+  "packages/database",
+  "apps/api",
+  "apps/orchestrator",
+  "workers/fake",
+  "workers/flux",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+creativo-common = { workspace = true }
+creativo-contracts = { workspace = true }
+creativo-db = { workspace = true }
+torch = { index = "pytorch-cu128" }
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.25",
+  "ruff>=0.9",
+  "httpx>=0.28",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = [
+  "packages/common/src",
+  "packages/contracts/src",
+  "packages/database/src",
+  "apps/api/src",
+  "apps/orchestrator/src",
+  "workers/fake/src",
+  "workers/flux/src",
+  "tests",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["B008", "E501"]

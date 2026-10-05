@@ -1,0 +1,1 @@
+"""Creativo fixture worker."""

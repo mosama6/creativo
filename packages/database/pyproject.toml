@@ -1,0 +1,21 @@
+[project]
+name = "creativo-db"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "alembic>=1.14",
+  "asyncpg>=0.30",
+  "creativo-common",
+  "greenlet>=3.1",
+  "sqlalchemy>=2.0.36",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]

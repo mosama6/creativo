@@ -1,0 +1,146 @@
+# One GPU host. The same file runs on a RunPod pod, another rental GPU, or a machine you own.
+# A model is another service with the worker env contract. It registers itself. Nothing here calls a vendor API.
+
+name: creativo
+
+x-control-env: &control-env
+  DATABASE_URL: postgresql+asyncpg://creativo:${POSTGRES_PASSWORD:-creativo}@postgres:5432/creativo
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_DIR: /data/objects
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: creativo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-creativo}
+      POSTGRES_DB: creativo
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U creativo -d creativo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    image: ${CREATIVO_IMAGE_PREFIX:-creativo}/control:${CREATIVO_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/control.Dockerfile
+    command: ["python", "-c", "from creativo_db.migrate import upgrade; upgrade()"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *control-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ${CREATIVO_IMAGE_PREFIX:-creativo}/control:${CREATIVO_TAG:-local}
+    command: ["python", "-m", "creativo_api"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *control-env
+    volumes:
+      - objects:/data/objects
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  orchestrator:
+    image: ${CREATIVO_IMAGE_PREFIX:-creativo}/control:${CREATIVO_TAG:-local}
+    command: ["python", "-m", "creativo_orchestrator"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *control-env
+    volumes:
+      - objects:/data/objects
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  web:
+    image: ${CREATIVO_IMAGE_PREFIX:-creativo}/web:${CREATIVO_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/web.Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        API_PROXY_URL: "http://api:8000"
+    environment:
+      API_PROXY_URL: http://api:8000
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+  worker-fixture:
+    profiles: ["fixture"]
+    image: ${CREATIVO_IMAGE_PREFIX:-creativo}/control:${CREATIVO_TAG:-local}
+    command: ["python", "-m", "creativo_worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *control-env
+      WORKER_ID: worker-fixture-1
+      WORKER_MODEL_ID: fixture-image
+      WORKER_PORT: "8100"
+      WORKER_ADVERTISE_URL: http://worker-fixture:8100
+    volumes:
+      - objects:/data/objects
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker-flux:
+    profiles: ["flux"]
+    image: ${CREATIVO_IMAGE_PREFIX:-creativo}/flux:${CREATIVO_TAG:-local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/flux.Dockerfile
+    gpus: all
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *control-env
+      WORKER_ID: worker-flux-1
+      WORKER_MODEL_ID: flux
+      WORKER_PORT: "8110"
+      WORKER_ADVERTISE_URL: http://worker-flux:8110
+      HF_HUB_CACHE: /data/hf/hub
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - objects:/data/objects
+      - hf:/data/hf
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  pg:
+  objects:
+  hf:

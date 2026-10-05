@@ -1,0 +1,78 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: creativo
+          POSTGRES_PASSWORD: creativo
+          POSTGRES_DB: creativo
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U creativo -d creativo"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.23"
+          enable-cache: true
+      - run: uv sync --frozen --all-packages --group dev
+      - run: uv run ruff check packages apps workers tests
+      - run: uv run pytest
+
+  images:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - name: control
+            file: deploy/docker/control.Dockerfile
+          - name: web
+            file: deploy/docker/web.Dockerfile
+          - name: flux
+            file: deploy/docker/flux.Dockerfile
+          - name: pod
+            file: deploy/docker/pod.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: names
+        run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.file }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.names.outputs.owner }}/creativo/${{ matrix.name }}:latest
+            ghcr.io/${{ steps.names.outputs.owner }}/creativo/${{ matrix.name }}:${{ github.sha }}

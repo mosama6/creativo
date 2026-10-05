@@ -1,0 +1,22 @@
+[project]
+name = "creativo-worker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "creativo-common",
+  "creativo-contracts",
+  "fastapi>=0.115",
+  "pillow>=11",
+  "redis>=5.2",
+  "uvicorn>=0.32",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
