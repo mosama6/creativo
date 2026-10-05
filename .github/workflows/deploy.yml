@@ -15,7 +15,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Copy the stack and start it
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
